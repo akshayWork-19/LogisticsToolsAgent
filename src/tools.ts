@@ -1,14 +1,7 @@
 import { tool } from "@langchain/core/tools";
 import { z } from "zod";
 
-/**
- * Three deliberately trivial, deterministic mock tools. The point of
- * this project isn't the tools themselves — it's that the LLM decides
- * WHICH one to call (or whether to call any at all), per turn, based
- * on the conversation so far. In every earlier project, YOU wrote the
- * if/else that decided the next step. Here, that decision moves into
- * the model's own tool-calling output.
- */
+// Logistics tools for order tracking, ETA calculation, and courier availability.
 
 const getOrderStatus = tool(
   async ({ orderId }) => {

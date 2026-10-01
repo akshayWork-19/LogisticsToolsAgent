@@ -9,16 +9,7 @@ import {
 import { ToolNode, toolsCondition } from "@langchain/langgraph/prebuilt";
 import { tools } from "./tools";
 
-/**
- * The actual difference from everything you've built so far: in the
- * email agent and delivery agent, YOUR CODE decided the route
- * (if/else on classification.intent, classification.exceptionType).
- * Here, `.bindTools(tools)` gives the model the tool definitions, and
- * the MODEL decides — per turn — whether to call a tool, which one,
- * and with what arguments. `toolsCondition` just checks whether the
- * model's last message included a tool call; it doesn't decide
- * anything itself.
- */
+// ReAct agent loop: binds tools to ChatGroq and routes conditionally via toolsCondition.
 
 const model = new ChatGroq({
   apiKey: process.env.GROQ_API_KEY,

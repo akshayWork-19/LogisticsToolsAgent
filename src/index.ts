@@ -23,11 +23,7 @@ async function main() {
   while (true) {
     const userInput = await rl.question("You:");
     if (userInput.trim().toLowerCase() === "exit") break;
-    // result.messages is the FULL accumulated history (same reducer
-    // behavior as chatbot #1). Track the length before this turn so
-    // we only print what's NEW — otherwise every turn would re-print
-    // every prior turn's tool calls too.
-
+    // Track message count before invocation to isolate and log new messages from this turn.
     const priorState = await app.getState(config);
     const messageCountBefore = priorState.values.messages?.length ?? 0;
 
@@ -45,11 +41,7 @@ async function main() {
 
     const newMessages = result.messages.slice(messageCountBefore + 1);
 
-    // Walk only this turn's new messages and print every tool call +
-    // tool result that happened — this is what makes the agent ->
-    // tools -> agent loop visible. Without this, you'd only see the
-    // final answer and have no idea whether a tool was even called,
-    // which one, or how many times the loop bounced back and forth.
+    // Print tool calls and intermediate tool outputs generated during this turn.
 
     for (const msg of newMessages) {
       if (msg instanceof AIMessage && msg.tool_calls?.length) {

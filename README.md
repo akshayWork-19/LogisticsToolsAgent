@@ -1,30 +1,107 @@
 # logistics-tool-agent
 
-Chatbot #4: a real tool-calling ReAct agent. Every prior project used `Command({ goto })` — YOUR code decided the route. This one is different: `.bindTools(tools)` gives the model the tool definitions, and the model decides, per turn, whether to call a tool, which one, and with what arguments. `toolsCondition` just checks whether the last message has `tool_calls` — it doesn't make any decisions itself.
+A conversational logistics ReAct agent built with LangGraph.js and Groq (`openai/gpt-oss-20b`). The agent leverages dynamic tool calling (`ToolNode` and `toolsCondition`) to autonomously decide when to query order statuses, calculate shipping ETAs, or check regional courier availability before synthesizing an answer.
 
-## Setup
+---
 
+## Architecture & ReAct Loop
+
+```
+                         [ START ]
+                             |
+                             v
+                         [ agent ] <---------------+
+                   (ChatGroq with tools)           |
+                             |                     |
+                    [ toolsCondition ]             |
+                      /            \               |
+            Has tool_calls?      No tool_calls     |
+                  /                    \           |
+                 v                      v          |
+             [ tools ]               [ END ]       |
+          (ToolNode execution)                     |
+                 |                                 |
+                 +---------------------------------+
+```
+
+### 1. ReAct Execution Flow (`src/graph.ts`)
+- **Tool Binding**: Tools are bound directly to `ChatGroq` via `model.bindTools(tools)`. The LLM evaluates user intent and decides whether to respond directly or emit tool invocations with validated JSON arguments.
+- **State Schema**: Uses LangGraph's prebuilt `MessagesAnnotation`.
+- **Conditional Routing**: Uses prebuilt `toolsCondition`. If the agent message contains `tool_calls`, control passes to `tools`. Otherwise, the turn concludes at `END`.
+- **Multi-Step Execution**: `tools` routes back into `agent`. This allows the model to inspect tool outputs and either call secondary tools or formulate the final user-facing reply in a single turn.
+- **Persistence**: Compiled with `MemorySaver` to retain conversational history across turns under a given `thread_id`.
+
+### 2. Registered Tools (`src/tools.ts`)
+All tools are defined with `@langchain/core/tools` using Zod input validation schemas:
+
+- **`getOrderStatus`**:
+  - *Description*: Retrieves current delivery status by order ID.
+  - *Schema*: `{ orderId: string }`.
+  - *Returns*: Status stage (`placed`, `picked_up`, `in_transit`, `out_for_delivery`, `delivered`).
+- **`calculateETA`**:
+  - *Description*: Estimates transit time between two Delhi NCR postal codes.
+  - *Schema*: `{ originPincode: string, destPincode: string }`.
+  - *Returns*: Estimated transit time in hours.
+- **`checkCourierAvailablity`**:
+  - *Description*: Checks courier partner coverage across Delhi NCR areas (e.g., Dwarka, Rohini, Connaught Place).
+  - *Schema*: `{ area: string }`.
+  - *Returns*: List of assigned courier identifiers or notification of unavailability.
+
+### 3. CLI Runtime & Event Inspection (`src/index.ts`)
+- Runs a terminal input loop via Node `readline`.
+- Compares message history lengths before and after each invocation to identify new messages.
+- Directly logs intermediate `[tool call]` payloads and `[tool result]` messages as they occur, providing clear visibility into the model's reasoning loop.
+
+---
+
+## File Structure
+
+| File | Purpose |
+| --- | --- |
+| `src/tools.ts` | Tool definitions (`getOrderStatus`, `calculateETA`, `checkCourierAvailablity`) with Zod schemas. |
+| `src/graph.ts` | LangGraph ReAct state graph, tool binding, and `MemorySaver` compilation. |
+| `src/index.ts` | Terminal chat loop with tool call and result logging. |
+| `package.json` | Project dependencies, scripts, and engine requirements. |
+| `tsconfig.json` | TypeScript configuration. |
+
+---
+
+## Setup & Running
+
+### Prerequisites
+- Node.js 18+
+- Groq API Key (from [console.groq.com](https://console.groq.com))
+
+### 1. Installation
 ```bash
 npm install
-cp .env.example .env   # add your GROQ_API_KEY
+```
+
+### 2. Environment Configuration
+Create a `.env` file from `.env.example`:
+```bash
+cp .env.example .env
+```
+Add your Groq API key:
+```env
+GROQ_API_KEY=gsk_your_actual_key_here
+```
+
+### 3. Start the Agent
+Launch the interactive CLI:
+```bash
 npm run dev
 ```
 
-## Verified before you got it
+Type queries such as:
+- *"What's the status of order ORD-2234?"*
+- *"Estimate delivery time from 110001 to 110075"*
+- *"Are there any couriers available in Rohini?"*
 
-- Type-checked clean against the real installed `@langchain/langgraph@0.2.74` types.
-- The three mock tools (`tools.ts`) were run standalone (not through the LLM) to confirm their outputs are correct — I couldn't test the actual LLM tool-calling loop myself (no Groq access in this sandbox), so that part is on you to verify.
+---
 
-## What's structurally different from every earlier project
+## Available Scripts
 
-- **State is `MessagesAnnotation`**, not a custom schema like `EmailAgentState`/`DeliveryExceptionState`. No `classification`, no `resolution` — just an accumulating message list, same as chatbot #1.
-- **No `Command` anywhere.** Routing is `.addConditionalEdges("agent", toolsCondition)` — the prebuilt function, not something you wrote.
-- **The loop can run more than once per turn.** If the model needs two tools to answer one question (e.g. "what's the ETA for order ORD-2234, and are there couriers free near it?"), it'll call one, see the result, decide it needs another, call that, and only then answer — `agent → tools → agent → tools → agent` in a single `invoke()`. Try forcing this with a two-part question and watch the `[tool call]` logs.
-
-## What to poke at
-
-- Ask something that needs NO tool ("what's the capital of France") and confirm `toolsCondition` routes straight to `END` — no `[tool call]` lines at all.
-- Ask something that needs exactly one tool, then something that plausibly needs two in the same message. Count how many `[tool call]` lines print for each.
-- Add a fourth tool yourself (e.g. `reportDeliveryException`, reusing the exception types from project #3) and see how little wiring it takes — that's the actual payoff of this pattern over `Command` routing: adding a new capability doesn't touch `graph.ts` at all, just `tools.ts`.
-- Set `temperature: 0` (already set in `graph.ts`) to `0.9` and ask the same order-status question a few times — does it still reliably call the tool, or does it start hallucinating an answer instead of calling `getOrderStatus`? This is a real, common failure mode worth seeing firsthand.
-- `checkCourierAvailability`'s roster only has 3 areas hardcoded. Ask about an area not in the list and check the tool result AND the model's final phrasing — does it correctly say "no couriers," or does it invent one anyway?
+- `npm run dev` - Runs `src/index.ts` via `tsx`.
+- `npm run build` - Compiles TypeScript to `dist/` using `tsc`.
+- `npm start` - Runs the compiled entry point `node dist/index.js`.
